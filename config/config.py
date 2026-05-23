@@ -1,6 +1,7 @@
 import os
 import secrets
 from pydantic_settings import BaseSettings
+from pydantic import computed_field
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "adora backend"
@@ -11,6 +12,7 @@ class Settings(BaseSettings):
     # Database Settings
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
+    @computed_field
     @property
     def DATABASE_URL(self) -> str:
         url = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join(self.BASE_DIR, 'adora.db')}")
@@ -32,8 +34,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
 
     # Default Admin
-    ADMIN_EMAIL: str = "kingalameen@admin.com"
-    ADMIN_PASSWORD: str = "kingalameenadmin"
+    ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL", "kingalameen@admin.com")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "kingalameenadmin")
 
     # Market Settings
     MARKET_UPDATE_INTERVAL: int = 1  # seconds
