@@ -5,7 +5,7 @@ services:
     runtime: python
     runtimeVersion: 3.11.7
     buildCommand: bash build.sh
-    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT -k uvicorn.workers.UvicornWorker main:app
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT -k uvicorn.workers.UvicornWorker app:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.7
@@ -13,5 +13,11 @@ services:
         value: "1"
       - key: PIP_NO_BUILD_ISOLATION
         value: "1"
+      - key: DATABASE_URL
+        value: sqlite:///./adora.db
+      - key: ADMIN_EMAIL
+        value: admin@adora.com
+      - key: ADMIN_PASSWORD
+        value: admin123456
     healthCheckPath: /api/health
     maxShutdownDelay: 30
