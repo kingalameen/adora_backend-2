@@ -74,6 +74,11 @@ app.include_router(notification_routes.router, prefix=settings.API_V1_STR)
 app.include_router(admin_routes.router, prefix=settings.API_V1_STR)
 app.include_router(ws_routes.router)
 
+# Health check endpoint for Render
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "service": "adora-backend"}
+
 def setup_default_admin():
     """Create default admin user if not exists."""
     db = SessionLocal()

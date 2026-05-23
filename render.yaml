@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: adora-backend
+    plan: free
+    runtime: python
+    runtimeVersion: 3.11.7
+    buildCommand: bash build.sh
+    startCommand: gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.7
+      - key: PIP_NO_CACHE_DIR
+        value: "1"
+      - key: PIP_NO_BUILD_ISOLATION
+        value: "1"
+    healthCheckPath: /api/health
+    maxShutdownDelay: 30

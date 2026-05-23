@@ -3,7 +3,7 @@
 set -e
 
 echo "Installing dependencies..."
-pip install -r requirements.txt
+pip install --no-build-isolation --no-cache-dir -r requirements.txt
 
 echo "Checking and fixing database if needed..."
 # Add any database setup commands here if needed
