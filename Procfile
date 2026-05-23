@@ -1,1 +1,1 @@
-web: gunicorn -w 1 -b 0.0.0.0:$PORT -k uvicorn.workers.UvicornWorker main:app
+web: uvicorn app:app --host 0.0.0.0 --port $PORT --loop uvloop
