@@ -1,7 +1,7 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 sqlalchemy==2.0.25
-pydantic[email]==2.5.3
+pydantic==2.5.3
 pydantic-settings==2.1.0
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.3.0
@@ -14,5 +14,4 @@ python-dotenv==1.0.1
 aiofiles==23.2.1
 httpx==0.26.0
 gunicorn==21.2.0
-python-dotenv==1.0.1
 psycopg2-binary==2.9.9

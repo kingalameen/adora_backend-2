@@ -1,7 +1,6 @@
 import os
 import secrets
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "adora backend"
@@ -35,34 +34,14 @@ class Settings(BaseSettings):
     # Default Admin
     ADMIN_EMAIL: str = "kingalameen@admin.com"
     ADMIN_PASSWORD: str = "kingalameenadmin"
-    DERIV_API_TOKEN: str = ""
-    
-    @field_validator('DERIV_API_TOKEN')
-    @classmethod
-    def validate_deriv_token(cls, v):
-        if not v or not str(v).strip():
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning("⚠️  DERIV_API_TOKEN is empty - Deriv market features will not work")
-        return v.strip() if isinstance(v, str) else v
 
     # Market Settings
     MARKET_UPDATE_INTERVAL: int = 1  # seconds
-    # Mapping: our display names → Deriv symbol names
+    # Mapping: our display names → asset symbol names
     ASSETS: list = ["BTC/USD", "ETH/USD", "EUR/USD", "GOLD"]
-    DERIV_SYMBOLS: dict = {
-        "BTC/USD":  "cryBTCUSD",
-        "ETH/USD":  "cryETHUSD",
-        "EUR/USD":  "frxEURUSD",
-        "GOLD":     "frxXAUUSD",
-    }
 
     # Trading logic
     PAYOUT_PERCENTAGE: float = 0.8  # 80%
-
-    # ── Deriv Real API ──────────────────────────────────────────────────────
-    DERIV_APP_ID: str = "1089"
-    DERIV_API_TOKEN: str = ""
 
     # ── CoinGecko ───────────────────────────────────────────────────────────
     COINGECKO_API_KEY: str = ""

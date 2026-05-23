@@ -11,7 +11,6 @@ from routes import auth_routes, user_routes, wallet_routes, trade_routes, ws_rou
 from services.market_simulator import market_simulator
 from services.trade_engine import trade_engine
 from services.dexscreener_client import dexscreener_client
-from services.deriv_client import deriv_client
 from auth.auth_handler import get_password_hash_sync
 from websocket.manager import manager
 from schemas.schemas import MarketPriceResponse
@@ -167,7 +166,6 @@ async def startup_event():
     
     dexscreener_client.seed_missing_candles()
     asyncio.create_task(dexscreener_client.run())
-    asyncio.create_task(deriv_client.run())
     
     # Start the scheduler for trade processing
     scheduler = BackgroundScheduler()
@@ -177,7 +175,7 @@ async def startup_event():
     # Start the async broadcasting task
     asyncio.create_task(broadcast_market_prices())
     
-    logger.info("ABBANDAYA Backend Started Successfully with Real Deriv API")
+    logger.info("ABBANDAYA Backend Started Successfully")
 
 @app.get("/")
 async def root():
