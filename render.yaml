@@ -5,7 +5,7 @@ services:
     runtime: python
     runtimeVersion: 3.11.7
     buildCommand: bash build.sh
-    startCommand: gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT -k uvicorn.workers.UvicornWorker main:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.7
