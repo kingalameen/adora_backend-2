@@ -128,7 +128,7 @@ class DexScreenerClient:
         logger.info("Checking for missing historical candles...")
         db = SessionLocal()
         try:
-            now = datetime.datetime.utcnow().replace(second=0, microsecond=0)
+            now = datetime.datetime.now(datetime.timezone.utc).replace(second=0, microsecond=0)
             for symbol in PAIRS.keys():
                 # Count recent candles
                 one_hour_ago = now - datetime.timedelta(hours=2)
@@ -193,7 +193,7 @@ class DexScreenerClient:
 
                 # 1Hz Tick Loop for live feel
                 for _ in range(30): # Refresh every 30s
-                    now = datetime.datetime.utcnow()
+                    now = datetime.datetime.now(datetime.timezone.utc)
                     db = SessionLocal()
                     try:
                         for symbol, price in _price_cache.items():

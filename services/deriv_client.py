@@ -139,7 +139,7 @@ def _update_market_price_db(display_name: str, price: float):
             pct = ((price - old) / old * 100) if old else 0.0
             record.current_price = price
             record.percentage_change = pct
-            record.updated_at = datetime.datetime.utcnow()
+            record.updated_at = datetime.datetime.now(datetime.timezone.utc)
         else:
             record = MarketPrice(
                 symbol=display_name,
@@ -339,7 +339,7 @@ class DerivClient:
                 return
 
             _price_cache[display_name] = price
-            tick_ts = datetime.datetime.utcfromtimestamp(epoch)
+            tick_ts = datetime.datetime.fromtimestamp(epoch, tz=datetime.timezone.utc)
             _update_candle(display_name, price, tick_ts)
             _update_market_price_db(display_name, price)
 
@@ -355,7 +355,7 @@ class DerivClient:
                     high=float(ohlc.get("high", 0)),
                     low=float(ohlc.get("low", 0)),
                     close=float(ohlc.get("close", 0)),
-                    ts=datetime.datetime.utcfromtimestamp(int(ohlc.get("open_time", 0))),
+                    ts=datetime.datetime.fromtimestamp(int(ohlc.get("open_time", 0)), tz=datetime.timezone.utc),
                 )
 
         elif msg_type == "candles":
@@ -372,7 +372,7 @@ class DerivClient:
                         high=float(c.get("high", 0)),
                         low=float(c.get("low", 0)),
                         close=float(c.get("close", 0)),
-                        ts=datetime.datetime.utcfromtimestamp(int(c.get("epoch", 0))),
+                        ts=datetime.datetime.fromtimestamp(int(c.get("epoch", 0)), tz=datetime.timezone.utc),
                     )
 
     # ── main loop ─────────────────────────────────────────────────────────────

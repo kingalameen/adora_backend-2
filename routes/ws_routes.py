@@ -53,9 +53,13 @@ async def websocket_trades(websocket: WebSocket, token: str):
     except WebSocketDisconnect:
         if user_id:
             manager.disconnect(websocket, "trades", user_id)
-    except Exception:
-        if not websocket.client_state.name == "DISCONNECTED":
-            await websocket.close(code=1008)
+    except Exception as e:
+        try:
+            if hasattr(websocket, 'client_state'):
+                if websocket.client_state.name != "DISCONNECTED":
+                    await websocket.close(code=1008)
+        except Exception as close_err:
+            logger.debug(f"WebSocket already closed: {close_err}")
         if user_id:
             manager.disconnect(websocket, "trades", user_id)
 

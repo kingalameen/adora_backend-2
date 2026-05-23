@@ -1,7 +1,8 @@
 import asyncio
 import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from config.config import settings
 from database.database import engine, Base, SessionLocal
@@ -11,13 +12,17 @@ from services.market_simulator import market_simulator
 from services.trade_engine import trade_engine
 from services.dexscreener_client import dexscreener_client
 from services.deriv_client import deriv_client
-from auth.auth_handler import get_password_hash
+from auth.auth_handler import get_password_hash_sync
 from websocket.manager import manager
 from schemas.schemas import MarketPriceResponse
 import logging
+import time
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Create database tables
@@ -34,6 +39,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request/Response timeout middleware to ensure endpoints respond quickly
+@app.middleware("http")
+async def enforce_response_timeout(request: Request, call_next):
+    """Ensure all endpoints respond within reasonable time."""
+    start_time = time.time()
+    path = request.url.path
+    method = request.method
+    
+    try:
+        # Set a per-request timeout of 30 seconds
+        response = await asyncio.wait_for(call_next(request), timeout=30.0)
+        elapsed = time.time() - start_time
+        logger.debug(f"[RESPONSE] {method} {path} completed in {elapsed:.2f}s")
+        return response
+    except asyncio.TimeoutError:
+        elapsed = time.time() - start_time
+        logger.error(f"[RESPONSE] ❌ {method} {path} TIMEOUT after {elapsed:.2f}s (>30s)")
+        return JSONResponse(
+            status_code=504,
+            content={"detail": "Request timeout - server took too long to respond"}
+        )
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"[RESPONSE] ❌ {method} {path} ERROR after {elapsed:.2f}s: {e}")
+        raise
+
 # Include Routers
 app.include_router(auth_routes.router, prefix=settings.API_V1_STR)
 app.include_router(user_routes.router, prefix=settings.API_V1_STR)
@@ -45,13 +76,17 @@ app.include_router(admin_routes.router, prefix=settings.API_V1_STR)
 app.include_router(ws_routes.router)
 
 def setup_default_admin():
+    """Create default admin user if not exists."""
     db = SessionLocal()
     try:
+        logger.info(f"[ADMIN-SETUP] Starting default admin setup...")
         # Check for the NEW admin email specifically
         admin = db.query(models.User).filter(models.User.email == settings.ADMIN_EMAIL).first()
         if not admin:
-            logger.info(f"Creating new default admin user: {settings.ADMIN_EMAIL}")
-            hashed_password = get_password_hash(settings.ADMIN_PASSWORD)
+            logger.info(f"[ADMIN-SETUP] Creating new default admin user: {settings.ADMIN_EMAIL}")
+            logger.debug(f"[ADMIN-SETUP] Hashing admin password...")
+            hashed_password = get_password_hash_sync(settings.ADMIN_PASSWORD)
+            logger.debug(f"[ADMIN-SETUP] Admin password hashed, creating user record...")
             new_admin = models.User(
                 full_name="ABBANDAYA Admin",
                 username="admin",
@@ -64,15 +99,17 @@ def setup_default_admin():
             )
             db.add(new_admin)
             db.commit()
-            logger.info("New admin created successfully.")
+            logger.info(f"[ADMIN-SETUP] ✅ New admin created successfully: {settings.ADMIN_EMAIL}")
         else:
             # Ensure they are actually an admin and have the correct password
             if not admin.is_admin:
                 admin.is_admin = True
                 db.commit()
-                logger.info(f"Promoted {settings.ADMIN_EMAIL} to admin.")
+                logger.info(f"[ADMIN-SETUP] Promoted {settings.ADMIN_EMAIL} to admin.")
+            else:
+                logger.debug(f"[ADMIN-SETUP] Admin user already exists and is properly configured")
     except Exception as e:
-        logger.error(f"Error setting up default admin: {e}")
+        logger.error(f"[ADMIN-SETUP] ❌ Error setting up default admin: {e}", exc_info=True)
     finally:
         db.close()
 
@@ -102,7 +139,7 @@ async def broadcast_market_prices():
                     await manager.broadcast({
                         "type": "market_update", 
                         "data": data,
-                        "timestamp": datetime.datetime.utcnow().isoformat()
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
                     }, "market")
             finally:
                 db.close()
@@ -115,14 +152,15 @@ async def broadcast_market_prices():
 async def startup_event():
     # Ensure metadata column exists in transactions table
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             from sqlalchemy import text
-            conn.execute(text("ALTER TABLE transactions ADD COLUMN tx_metadata VARCHAR;"))
-            conn.commit()
-            logger.info("Added tx_metadata column to transactions table.")
-    except Exception:
-        # Expected to fail if column already exists
-        pass
+            try:
+                conn.execute(text("ALTER TABLE transactions ADD COLUMN tx_metadata VARCHAR;"))
+                logger.info("✅ Added tx_metadata column to transactions table.")
+            except Exception as e:
+                logger.debug(f"tx_metadata column might already exist: {e}")
+    except Exception as e:
+        logger.error(f"❌ Database startup error: {e}", exc_info=True)
 
     setup_default_admin()
     market_simulator.initialize_market()

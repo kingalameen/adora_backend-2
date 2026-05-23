@@ -1,6 +1,7 @@
 import os
 import secrets
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "adora backend"
@@ -14,6 +15,11 @@ class Settings(BaseSettings):
     @property
     def DATABASE_URL(self) -> str:
         url = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join(self.BASE_DIR, 'adora.db')}")
+        
+        # SQLAlchemy 1.4+ and 2.0 require 'postgresql://' instead of 'postgres://'
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+            
         if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
             # It's a relative sqlite path, make it absolute relative to BASE_DIR
             relative_path = url.replace("sqlite:///", "")
@@ -29,6 +35,16 @@ class Settings(BaseSettings):
     # Default Admin
     ADMIN_EMAIL: str = "kingalameen@admin.com"
     ADMIN_PASSWORD: str = "kingalameenadmin"
+    DERIV_API_TOKEN: str = ""
+    
+    @field_validator('DERIV_API_TOKEN')
+    @classmethod
+    def validate_deriv_token(cls, v):
+        if not v or not str(v).strip():
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("⚠️  DERIV_API_TOKEN is empty - Deriv market features will not work")
+        return v.strip() if isinstance(v, str) else v
 
     # Market Settings
     MARKET_UPDATE_INTERVAL: int = 1  # seconds
