@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -17,12 +17,37 @@ BCRYPT_MAX_BYTES = 72
 _executor = ThreadPoolExecutor(max_workers=4)
 
 def _truncate_password(password: str) -> str:
-    """Truncate password to 72 bytes max (bcrypt limit). Prevents silent truncation issues."""
-    encoded = password.encode('utf-8')
-    if len(encoded) > BCRYPT_MAX_BYTES:
-        logger.debug(f"[PASSWORD] Password exceeds {BCRYPT_MAX_BYTES} bytes, truncating")
-        encoded = encoded[:BCRYPT_MAX_BYTES]
-    return encoded.decode('utf-8', errors='ignore')
+    """
+    Truncate password to 72 bytes max (bcrypt limit) safely.
+    
+    IMPORTANT: Properly handles UTF-8 by truncating at character boundaries,
+    not at arbitrary byte positions to prevent corruption.
+    """
+    try:
+        encoded = password.encode('utf-8')
+        
+        if len(encoded) <= BCRYPT_MAX_BYTES:
+            return password
+        
+        # Truncate byte string and safely decode, handling incomplete characters
+        truncated_bytes = encoded[:BCRYPT_MAX_BYTES]
+        
+        # Try to decode, removing incomplete UTF-8 sequences from the end
+        for i in range(len(truncated_bytes), 0, -1):
+            try:
+                decoded = truncated_bytes[:i].decode('utf-8')
+                logger.debug(f"[PASSWORD] Password truncated from {len(encoded)} to {i} bytes (safe UTF-8 boundary)")
+                return decoded
+            except UnicodeDecodeError:
+                # Byte at position i breaks UTF-8, try smaller
+                continue
+        
+        # Fallback: should never reach here if password had at least 1 byte
+        logger.warning("[PASSWORD] Failed to safely truncate password, using original")
+        return password
+    except Exception as e:
+        logger.error(f"[PASSWORD] Error truncating password: {e}")
+        return password
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -102,18 +127,20 @@ async def get_password_hash(password):
         raise
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """Create JWT access token."""
+    """Create JWT access token with proper UTC timezone handling."""
     try:
         logger.debug(f"[JWT] Creating access token for user: {data.get('sub')}")
         to_encode = data.copy()
+        
         if expires_delta:
-            expire = datetime.now(datetime.timezone.utc) + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
-            expire = datetime.now(datetime.timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
         logger.debug(f"[JWT] ✅ Access token created successfully")
         return encoded_jwt
     except Exception as e:
-        logger.error(f"[JWT] Token creation error: {e}")
+        logger.error(f"[JWT] Token creation error: {e}", exc_info=True)
         raise

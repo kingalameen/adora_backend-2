@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+from datetime import timezone as dt_timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -26,12 +27,27 @@ logger = logging.getLogger(__name__)
 
 # Create database tables with error handling
 logger.info(f"[STARTUP] Creating database tables...")
+print(f"[STARTUP-PRINT] Initializing database tables...")
 try:
     Base.metadata.create_all(bind=engine)
     logger.info(f"[STARTUP] ✅ Database tables created successfully")
+    print(f"[STARTUP-PRINT] ✓ All database tables created")
+    
+    # Verify tables exist
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    logger.info(f"[STARTUP] Database tables: {tables}")
+    if 'users' in tables:
+        logger.info(f"[STARTUP] ✓ Users table confirmed present")
+        columns = [col['name'] for col in inspector.get_columns('users')]
+        logger.debug(f"[STARTUP] Users table columns: {columns}")
+    
 except Exception as e:
     logger.error(f"[STARTUP] ❌ Failed to create database tables: {str(e)}", exc_info=True)
     print(f"[STARTUP-PRINT] ERROR creating tables: {str(e)}")
+    import traceback
+    print(f"[STARTUP-PRINT] Traceback: {traceback.format_exc()}")
     raise
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
@@ -84,49 +100,92 @@ app.include_router(ws_routes.router)
 # Health check endpoint for Render
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "service": "adora-backend"}
+    """Basic health check endpoint."""
+    return {"status": "ok", "service": "adora-backend", "version": settings.VERSION}
 
-# Diagnostic endpoint for debugging registration issues
+# Comprehensive diagnostic endpoint for debugging registration issues
 @app.get("/api/debug/registration")
 async def debug_registration():
     """
     Diagnostic endpoint to verify registration system is working.
-    Returns database status, user count, and column information.
+    
+    Returns:
+    - Database connection status
+    - User count
+    - User table columns
+    - Admin status
+    - Database type
+    - Engine pool status
+    
+    Useful for debugging registration failures.
     """
+    import traceback
     try:
-        logger.info(f"[DEBUG] Registration diagnostic check requested")
+        logger.info("[DEBUG-REGISTRATION] Diagnostic check requested")
         
         db = SessionLocal()
         try:
             # Test database connection
+            logger.debug("[DEBUG-REGISTRATION] Querying user count...")
             user_count = db.query(models.User).count()
-            logger.info(f"[DEBUG] User count: {user_count}")
+            logger.debug(f"[DEBUG-REGISTRATION] User count: {user_count}")
             
             # Get table columns
+            logger.debug("[DEBUG-REGISTRATION] Inspecting User table columns...")
             user_table_columns = [col.name for col in models.User.__table__.columns]
-            logger.info(f"[DEBUG] User table columns: {user_table_columns}")
+            logger.debug(f"[DEBUG-REGISTRATION] Columns: {user_table_columns}")
             
             # Check if admin exists
+            logger.debug("[DEBUG-REGISTRATION] Checking for admin user...")
             admin = db.query(models.User).filter(models.User.email == settings.ADMIN_EMAIL).first()
-            admin_exists = admin is not None
+            admin_info = {
+                "exists": admin is not None,
+                "email": settings.ADMIN_EMAIL,
+                "is_admin": admin.is_admin if admin else False
+            }
+            
+            # Get database engine info
+            db_type = "sqlite" if "sqlite" in settings.DATABASE_URL else "postgresql"
+            
+            # Try to get pool status
+            pool_info = {
+                "size": engine.pool.size() if hasattr(engine.pool, 'size') else "N/A",
+                "checked_out": engine.pool.checkedout() if hasattr(engine.pool, 'checkedout') else "N/A"
+            }
             
             return {
                 "status": "ok",
-                "database": "connected",
-                "user_count": user_count,
-                "user_table_columns": user_table_columns,
-                "admin_exists": admin_exists,
-                "admin_email": settings.ADMIN_EMAIL if admin_exists else None,
-                "database_url": "sqlite" if "sqlite" in settings.DATABASE_URL else "postgresql"
+                "diagnostic": {
+                    "database": {
+                        "connected": True,
+                        "type": db_type,
+                        "url": settings.DATABASE_URL[:50] + "..." if len(settings.DATABASE_URL) > 50 else settings.DATABASE_URL,
+                    },
+                    "users": {
+                        "total_count": user_count,
+                        "table_columns": user_table_columns,
+                        "admin": admin_info
+                    },
+                    "engine": {
+                        "pool": pool_info
+                    }
+                },
+                "timestamp": datetime.datetime.now(dt_timezone.utc).isoformat()
             }
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"[DEBUG] Diagnostic check failed: {str(e)}", exc_info=True)
+        error_trace = traceback.format_exc()
+        logger.error(f"[DEBUG-REGISTRATION] Diagnostic check failed: {str(e)}", exc_info=True)
+        print(f"[DEBUG-REGISTRATION-ERROR]\n{error_trace}")
         return {
             "status": "error",
-            "error": str(e),
-            "message": "Failed to run diagnostic checks"
+            "diagnostic": {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "message": "Failed to run diagnostic checks"
+            },
+            "timestamp": datetime.datetime.now(dt_timezone.utc).isoformat()
         }
 
 def setup_default_admin():
@@ -195,7 +254,7 @@ async def broadcast_market_prices():
                     await manager.broadcast({
                         "type": "market_update", 
                         "data": data,
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        "timestamp": datetime.datetime.now(dt_timezone.utc).isoformat()
                     }, "market")
             finally:
                 db.close()
