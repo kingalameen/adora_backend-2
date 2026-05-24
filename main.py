@@ -28,27 +28,84 @@ logger = logging.getLogger(__name__)
 # Create database tables with error handling
 logger.info(f"[STARTUP] Creating database tables...")
 print(f"[STARTUP-PRINT] Initializing database tables...")
+print(f"[STARTUP-PRINT] Database URL: {settings.DATABASE_URL}")
+
 try:
+    # Test database connection first
+    from sqlalchemy import text
+    test_conn = engine.connect()
+    test_conn.execute(text("SELECT 1"))
+    test_conn.close()
+    logger.info(f"[STARTUP] ✅ Database connection test passed")
+    print(f"[STARTUP-PRINT] ✓ Database connection successful")
+    
+except Exception as conn_err:
+    logger.error(f"[STARTUP] ❌ Database connection FAILED: {conn_err}", exc_info=True)
+    print(f"[STARTUP-PRINT] ❌ DATABASE CONNECTION FAILED!")
+    print(f"[STARTUP-PRINT] Error: {str(conn_err)}")
+    import traceback
+    print(f"[STARTUP-PRINT] Traceback: {traceback.format_exc()}")
+    raise
+
+try:
+    # Create all tables
     Base.metadata.create_all(bind=engine)
     logger.info(f"[STARTUP] ✅ Database tables created successfully")
     print(f"[STARTUP-PRINT] ✓ All database tables created")
     
-    # Verify tables exist
+    # Verify tables exist and are accessible
     from sqlalchemy import inspect
     inspector = inspect(engine)
     tables = inspector.get_table_names()
     logger.info(f"[STARTUP] Database tables: {tables}")
+    print(f"[STARTUP-PRINT] Tables in database: {len(tables)} total")
+    
     if 'users' in tables:
         logger.info(f"[STARTUP] ✓ Users table confirmed present")
+        print(f"[STARTUP-PRINT] ✓ Users table verified")
         columns = [col['name'] for col in inspector.get_columns('users')]
         logger.debug(f"[STARTUP] Users table columns: {columns}")
+        print(f"[STARTUP-PRINT] Users table has {len(columns)} columns")
+        
+        # Test users table connectivity
+        try:
+            test_session = SessionLocal()
+            test_session.execute(text("SELECT COUNT(*) FROM users"))
+            test_session.close()
+            logger.info(f"[STARTUP] ✓ Users table is accessible and queryable")
+            print(f"[STARTUP-PRINT] ✓ Users table is accessible")
+        except Exception as table_access_err:
+            logger.warning(f"[STARTUP] ⚠️  Could not query users table: {table_access_err}")
+            print(f"[STARTUP-PRINT] ⚠️  Users table accessibility check: {table_access_err}")
+    else:
+        logger.error(f"[STARTUP] ❌ Users table NOT FOUND in database!")
+        print(f"[STARTUP-PRINT] ❌ CRITICAL: Users table missing!")
+        raise Exception("Users table was not created")
     
 except Exception as e:
     logger.error(f"[STARTUP] ❌ Failed to create database tables: {str(e)}", exc_info=True)
-    print(f"[STARTUP-PRINT] ERROR creating tables: {str(e)}")
+    print(f"[STARTUP-PRINT] ❌ ERROR creating tables: {str(e)}")
     import traceback
     print(f"[STARTUP-PRINT] Traceback: {traceback.format_exc()}")
     raise
+
+# Warm up connections pools
+logger.info(f"[STARTUP] Warming up connection pool...")
+print(f"[STARTUP-PRINT] Warming up connection pool...")
+try:
+    for i in range(3):
+        try:
+            session = SessionLocal()
+            session.execute(text("SELECT 1"))
+            session.close()
+            logger.debug(f"[STARTUP] Connection pool warmup {i+1}/3 successful")
+        except Exception as warmup_err:
+            logger.warning(f"[STARTUP] Connection pool warmup {i+1}/3 failed: {warmup_err}")
+    print(f"[STARTUP-PRINT] ✓ Connection pool warmed up")
+except Exception as pool_err:
+    logger.warning(f"[STARTUP] Connection pool warmup failed: {pool_err}")
+    print(f"[STARTUP-PRINT] ⚠️  Connection pool warmup incomplete")
+
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
 
@@ -86,6 +143,54 @@ async def enforce_response_timeout(request: Request, call_next):
         elapsed = time.time() - start_time
         logger.error(f"[RESPONSE] ❌ {method} {path} ERROR after {elapsed:.2f}s: {e}")
         raise
+
+# Global exception handler for unhandled errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to catch any unhandled exceptions and return proper JSON.
+    
+    This ensures that:
+    - No bare exceptions reach the Flutter app
+    - All errors return valid JSON with proper status codes
+    - Detailed error logs are printed for debugging in Render
+    - Tracebacks are visible in Render logs
+    """
+    import traceback
+    import sys
+    
+    path = request.url.path
+    method = request.method
+    error_id = datetime.datetime.now(dt_timezone.utc).isoformat()
+    
+    # Log the error
+    logger.error(f"[GLOBAL-ERROR] ❌ Unhandled exception in {method} {path}")
+    logger.error(f"[GLOBAL-ERROR] Error ID: {error_id}")
+    logger.error(f"[GLOBAL-ERROR] Exception type: {type(exc).__name__}")
+    logger.error(f"[GLOBAL-ERROR] Exception message: {str(exc)}")
+    logger.error(f"[GLOBAL-ERROR] Full traceback:\n{traceback.format_exc()}")
+    
+    # Print to Render console
+    print(f"\n{'='*80}")
+    print(f"[GLOBAL-ERROR-CRITICAL] Unhandled exception in {method} {path}")
+    print(f"[GLOBAL-ERROR-CRITICAL] Error ID: {error_id}")
+    print(f"[GLOBAL-ERROR-CRITICAL] Exception type: {type(exc).__name__}")
+    print(f"[GLOBAL-ERROR-CRITICAL] Error message: {str(exc)}")
+    print(f"[GLOBAL-ERROR-CRITICAL] Full traceback:")
+    print(traceback.format_exc())
+    print(f"{'='*80}\n")
+    sys.stdout.flush()
+    
+    # Return proper JSON error response
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error_id": error_id,
+            "error_type": type(exc).__name__,
+            "message": "An unexpected error occurred. Please contact support with the error ID."
+        }
+    )
 
 # Include Routers
 app.include_router(auth_routes.router, prefix=settings.API_V1_STR)

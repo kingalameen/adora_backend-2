@@ -53,27 +53,33 @@ Base = declarative_base()
 
 def get_db():
     """
-    Get database session with proper cleanup.
+    Get database session with proper cleanup and error recovery.
     
     CRITICAL: This dependency ensures:
     - Each request gets its own session
     - Sessions are ALWAYS closed, even on error
+    - Connection pool properly managed
     - No connection leaks
+    - Proper rollback on errors
     """
     db = SessionLocal()
     try:
         logger.debug("[DATABASE] Session created for request")
         yield db
-    except Exception as e:
-        logger.error(f"[DATABASE] Error in session, rolling back: {e}")
+        # If we get here, commit any pending transactions
+        logger.debug("[DATABASE] Session yielded, waiting for endpoint to use it")
+    except Exception as endpoint_err:
+        logger.error(f"[DATABASE] Endpoint error in session, rolling back: {endpoint_err}")
         try:
             db.rollback()
-        except:
-            pass
+            logger.debug("[DATABASE] Rollback successful")
+        except Exception as rollback_err:
+            logger.warning(f"[DATABASE] Rollback failed: {rollback_err}")
         raise
     finally:
         try:
             db.close()
             logger.debug("[DATABASE] Session closed for request")
-        except Exception as e:
-            logger.warning(f"[DATABASE] Error closing session: {e}")
+        except Exception as close_err:
+            logger.warning(f"[DATABASE] Error closing session: {close_err}")
+
