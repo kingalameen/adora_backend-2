@@ -24,8 +24,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables with error handling
+logger.info(f"[STARTUP] Creating database tables...")
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info(f"[STARTUP] ✅ Database tables created successfully")
+except Exception as e:
+    logger.error(f"[STARTUP] ❌ Failed to create database tables: {str(e)}", exc_info=True)
+    print(f"[STARTUP-PRINT] ERROR creating tables: {str(e)}")
+    raise
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
 
@@ -78,6 +85,49 @@ app.include_router(ws_routes.router)
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "service": "adora-backend"}
+
+# Diagnostic endpoint for debugging registration issues
+@app.get("/api/debug/registration")
+async def debug_registration():
+    """
+    Diagnostic endpoint to verify registration system is working.
+    Returns database status, user count, and column information.
+    """
+    try:
+        logger.info(f"[DEBUG] Registration diagnostic check requested")
+        
+        db = SessionLocal()
+        try:
+            # Test database connection
+            user_count = db.query(models.User).count()
+            logger.info(f"[DEBUG] User count: {user_count}")
+            
+            # Get table columns
+            user_table_columns = [col.name for col in models.User.__table__.columns]
+            logger.info(f"[DEBUG] User table columns: {user_table_columns}")
+            
+            # Check if admin exists
+            admin = db.query(models.User).filter(models.User.email == settings.ADMIN_EMAIL).first()
+            admin_exists = admin is not None
+            
+            return {
+                "status": "ok",
+                "database": "connected",
+                "user_count": user_count,
+                "user_table_columns": user_table_columns,
+                "admin_exists": admin_exists,
+                "admin_email": settings.ADMIN_EMAIL if admin_exists else None,
+                "database_url": "sqlite" if "sqlite" in settings.DATABASE_URL else "postgresql"
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"[DEBUG] Diagnostic check failed: {str(e)}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to run diagnostic checks"
+        }
 
 def setup_default_admin():
     """Create default admin user if not exists."""
