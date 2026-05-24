@@ -10,8 +10,19 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+# BCRYPT PASSWORD LIMIT: 72 bytes (bcrypt truncates silently if longer)
+BCRYPT_MAX_BYTES = 72
+
 # Thread pool for CPU-intensive bcrypt operations
 _executor = ThreadPoolExecutor(max_workers=4)
+
+def _truncate_password(password: str) -> str:
+    """Truncate password to 72 bytes max (bcrypt limit). Prevents silent truncation issues."""
+    encoded = password.encode('utf-8')
+    if len(encoded) > BCRYPT_MAX_BYTES:
+        logger.debug(f"[PASSWORD] Password exceeds {BCRYPT_MAX_BYTES} bytes, truncating")
+        encoded = encoded[:BCRYPT_MAX_BYTES]
+    return encoded.decode('utf-8', errors='ignore')
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -26,7 +37,9 @@ def verify_password_sync(plain_password, hashed_password):
     """Synchronous password verification (for non-async contexts)."""
     try:
         logger.debug(f"[VERIFY] Starting bcrypt verify_password_sync")
-        result = pwd_context.verify(plain_password, hashed_password)
+        # Truncate password to 72 bytes (bcrypt limit)
+        truncated = _truncate_password(plain_password)
+        result = pwd_context.verify(truncated, hashed_password)
         logger.debug(f"[VERIFY] Password verification result: {result}")
         return result
     except Exception as e:
@@ -37,10 +50,13 @@ async def verify_password(plain_password, hashed_password):
     """Async password verification using thread pool to prevent blocking."""
     try:
         logger.debug(f"[VERIFY-ASYNC] Starting async password verification")
+        # Truncate password to 72 bytes (bcrypt limit)
+        truncated = _truncate_password(plain_password)
+        logger.debug(f"[VERIFY-ASYNC] Password truncated to {len(truncated.encode('utf-8'))} bytes")
         # Run blocking bcrypt in thread pool with timeout
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
-            loop.run_in_executor(_executor, pwd_context.verify, plain_password, hashed_password),
+            loop.run_in_executor(_executor, pwd_context.verify, truncated, hashed_password),
             timeout=5.0  # 5 second timeout on bcrypt
         )
         logger.debug(f"[VERIFY-ASYNC] Password verification completed: {result}")
@@ -56,7 +72,9 @@ def get_password_hash_sync(password):
     """Synchronous password hashing."""
     try:
         logger.debug(f"[HASH] Starting password hash")
-        hashed = pwd_context.hash(password)
+        # Truncate password to 72 bytes (bcrypt limit)
+        truncated = _truncate_password(password)
+        hashed = pwd_context.hash(truncated)
         logger.debug(f"[HASH] Password hash completed successfully")
         return hashed
     except Exception as e:
@@ -67,9 +85,11 @@ async def get_password_hash(password):
     """Async password hashing using thread pool."""
     try:
         logger.debug(f"[HASH-ASYNC] Starting async password hash")
+        # Truncate password to 72 bytes (bcrypt limit)
+        truncated = _truncate_password(password)
         loop = asyncio.get_event_loop()
         hashed = await asyncio.wait_for(
-            loop.run_in_executor(_executor, pwd_context.hash, password),
+            loop.run_in_executor(_executor, pwd_context.hash, truncated),
             timeout=10.0  # 10 second timeout on hash
         )
         logger.debug(f"[HASH-ASYNC] Password hash completed successfully")

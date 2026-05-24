@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from models.models import TradeStatus, TradeResult, TransactionType, TransactionStatus
@@ -14,6 +14,17 @@ class TokenData(BaseModel):
 class LoginRequest(BaseModel):
     username_or_email: str
     password: str
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password length (max 72 bytes for bcrypt)."""
+        if not v or len(v) == 0:
+            raise ValueError('Password cannot be empty')
+        # Check byte length, not character length
+        if len(v.encode('utf-8')) > 256:
+            raise ValueError('Password is too long (max 256 characters)')
+        return v
 
 # --- User Schemas ---
 class UserBase(BaseModel):
@@ -25,6 +36,19 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password strength and length."""
+        if not v or len(v) == 0:
+            raise ValueError('Password cannot be empty')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters')
+        # Check byte length, not character length
+        if len(v.encode('utf-8')) > 256:
+            raise ValueError('Password is too long (max 256 characters)')
+        return v
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None

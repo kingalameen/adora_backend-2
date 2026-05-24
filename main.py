@@ -89,7 +89,9 @@ def setup_default_admin():
         if not admin:
             logger.info(f"[ADMIN-SETUP] Creating new default admin user: {settings.ADMIN_EMAIL}")
             logger.debug(f"[ADMIN-SETUP] Hashing admin password...")
-            hashed_password = get_password_hash_sync(settings.ADMIN_PASSWORD)
+            # Ensure password is safe
+            admin_pass = settings.ADMIN_PASSWORD[:72] if settings.ADMIN_PASSWORD else "admin123"
+            hashed_password = get_password_hash_sync(admin_pass)
             logger.debug(f"[ADMIN-SETUP] Admin password hashed, creating user record...")
             new_admin = models.User(
                 full_name="ABBANDAYA Admin",
@@ -169,7 +171,8 @@ async def startup_event():
     setup_default_admin()
     market_simulator.initialize_market()
     
-    dexscreener_client.seed_missing_candles()
+    # Seed candles in background (non-blocking)
+    asyncio.create_task(_seed_candles_background())
     asyncio.create_task(dexscreener_client.run())
     
     # Start the scheduler for trade processing
@@ -181,6 +184,18 @@ async def startup_event():
     asyncio.create_task(broadcast_market_prices())
     
     logger.info("ABBANDAYA Backend Started Successfully")
+
+async def _seed_candles_background():
+    """Run seed_missing_candles in background without blocking startup."""
+    await asyncio.sleep(0.1)  # Yield to let server fully start
+    try:
+        logger.info("[STARTUP] Running candle seed in background...")
+        # Run in thread pool to not block event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, dexscreener_client.seed_missing_candles)
+        logger.info("[STARTUP] ✅ Candle seed completed")
+    except Exception as e:
+        logger.error(f"[STARTUP] Error seeding candles: {e}", exc_info=True)
 
 @app.get("/")
 async def root():

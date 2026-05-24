@@ -16,6 +16,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=UserResponse)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
     logger.info(f"[REGISTER] Start: email={user_in.email}")
+    
+    # Validate password
+    if len(user_in.password) < 6:
+        logger.warning(f"[REGISTER] Password too short")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters"
+        )
+    
     user_db = db.query(User).filter(
         (User.email == user_in.email) | (User.username == user_in.username)
     ).first()
@@ -49,17 +58,23 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 async def login(login_req: LoginRequest, db: Session = Depends(get_db)):
     """Async login endpoint with proper logging and timeout handling."""
+    import time
+    login_start_time = time.time()
     try:
         logger.info(f"[LOGIN] ═══════════════════════════════════════")
-        logger.info(f"[LOGIN] 🔐 LOGIN ENDPOINT CALLED")
+        logger.info(f"[LOGIN] 🔐 LOGIN ENDPOINT CALLED at {login_start_time}")
         logger.info(f"[LOGIN] Username/Email: {login_req.username_or_email}")
         logger.info(f"[LOGIN] ═══════════════════════════════════════")
         
+        # Step 1: Database user lookup
+        lookup_start = time.time()
         logger.debug(f"[LOGIN] Querying database for user...")
         user = db.query(User).filter(
             (User.email == login_req.username_or_email) | 
             (User.username == login_req.username_or_email)
         ).first()
+        lookup_elapsed = time.time() - lookup_start
+        logger.debug(f"[LOGIN] Database lookup completed in {lookup_elapsed:.4f}s")
         
         if not user:
             logger.warning(f"[LOGIN] ❌ User not found: {login_req.username_or_email}")
@@ -69,10 +84,13 @@ async def login(login_req: LoginRequest, db: Session = Depends(get_db)):
             )
         
         logger.debug(f"[LOGIN] User found: {user.username} (id={user.id})")
-        logger.debug(f"[LOGIN] Starting password verification...")
         
-        # This now runs in a thread pool and has a timeout
+        # Step 2: Password verification
+        verify_start = time.time()
+        logger.debug(f"[LOGIN] Starting password verification...")
         password_valid = await verify_password(login_req.password, user.hashed_password)
+        verify_elapsed = time.time() - verify_start
+        logger.debug(f"[LOGIN] Password verification completed in {verify_elapsed:.4f}s")
         
         if not password_valid:
             logger.warning(f"[LOGIN] ❌ Invalid password for user: {user.username}")
@@ -83,16 +101,22 @@ async def login(login_req: LoginRequest, db: Session = Depends(get_db)):
         
         logger.debug(f"[LOGIN] ✅ Password verified successfully")
         
+        # Step 3: Check ban status
         if user.is_banned:
             logger.warning(f"[LOGIN] ❌ User is banned: {user.username}")
             raise HTTPException(status_code=403, detail="User is banned")
         
+        # Step 4: Create JWT token
+        token_start = time.time()
         logger.debug(f"[LOGIN] Creating JWT token...")
         access_token = create_access_token(data={"sub": user.username})
-        logger.info(f"[LOGIN] ✅ JWT token created successfully")
+        token_elapsed = time.time() - token_start
+        logger.info(f"[LOGIN] ✅ JWT token created successfully in {token_elapsed:.4f}s")
         
+        total_elapsed = time.time() - login_start_time
         logger.info(f"[LOGIN] ═══════════════════════════════════════")
         logger.info(f"[LOGIN] ✅ LOGIN SUCCESSFUL: {user.username}")
+        logger.info(f"[LOGIN] Total login time: {total_elapsed:.4f}s")
         logger.info(f"[LOGIN] ═══════════════════════════════════════")
         
         return {"access_token": access_token, "token_type": "bearer"}
@@ -100,7 +124,8 @@ async def login(login_req: LoginRequest, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[LOGIN] ❌ UNEXPECTED ERROR: {e}", exc_info=True)
+        elapsed = time.time() - login_start_time
+        logger.error(f"[LOGIN] ❌ UNEXPECTED ERROR after {elapsed:.4f}s: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed due to server error"

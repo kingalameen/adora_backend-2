@@ -140,6 +140,7 @@ class DexScreenerClient:
                 if count < 50:
                     logger.info(f"Seeding mock history for {symbol} ({count} recent candles found)")
                     price = _price_cache.get(symbol, 100.0)
+                    candles_to_add = []
                     for i in range(100, 0, -1):
                         ts = now - datetime.timedelta(minutes=i)
                         # Check if this specific minute exists
@@ -164,9 +165,14 @@ class DexScreenerClient:
                                 timestamp=ts,
                                 granularity=60
                             )
-                            db.add(candle)
+                            candles_to_add.append(candle)
                             price = c # Next candle starts from here
-                    db.commit()
+                    
+                    # Bulk add and commit once
+                    if candles_to_add:
+                        db.add_all(candles_to_add)
+                        db.commit()
+                        logger.debug(f"Added {len(candles_to_add)} candles for {symbol}")
         except Exception as e:
             logger.error(f"Seeding error: {e}")
             db.rollback()
